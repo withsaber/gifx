@@ -1,0 +1,34 @@
+{
+  "name": "gifx-figma-plugin",
+  "version": "1.0.0",
+  "description": "A Figma plugin to create GIFs from selected frames",
+  "type": "module",
+  "scripts": {
+    "build": "npm run build:plugin && npm run build:ui",
+    "build:plugin": "esbuild src/plugin/code.ts --bundle --outfile=dist/code.js --target=es2017",
+    "build:ui": "vite build",
+    "watch": "npm-run-all --parallel watch:*",
+    "watch:plugin": "esbuild src/plugin/code.ts --bundle --outfile=dist/code.js --target=es2017 --watch",
+    "watch:ui": "vite build --watch"
+  },
+  "dependencies": {
+    "gif.js": "^0.2.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@figma/plugin-typings": "^1.90.0",
+    "@types/node": "^20.10.0",
+    "@types/react": "^18.2.45",
+    "@types/react-dom": "^18.2.18",
+    "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.16",
+    "esbuild": "^0.19.10",
+    "npm-run-all": "^4.1.5",
+    "postcss": "^8.4.32",
+    "tailwindcss": "^3.4.0",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.8",
+    "vite-plugin-singlefile": "^2.0.0"
+  }
+}
