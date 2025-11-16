@@ -39,9 +39,11 @@ export async function generateGif(options: GenerateGifOptions): Promise<Blob> {
   const height = Math.round(firstFrame.height * config.scale);
 
   // Initialize GIF encoder
-  // gif.js uses web workers (loaded from CDN by default)
+  // Note: Workers are disabled (workers: 0) because in Figma's sandboxed plugin
+  // environment, we cannot load external worker files. This makes GIF generation
+  // run in the main thread, which is fine for typical use cases (5-20 frames).
   const gif = new GIF({
-    workers: 2,
+    workers: 0, // Disable workers to avoid "gif.worker.js not found" error in Figma
     quality: 11 - config.quality, // gif.js uses 1-10 where 1 is best, we invert for intuitive UX
     width,
     height,
