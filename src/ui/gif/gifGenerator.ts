@@ -1,15 +1,16 @@
 /**
  * GIF generation module
- * Uses gif.js library to create animated GIFs from frame images
+ * Uses gifenc library to create animated GIFs from frame images
  *
- * gif.js is chosen because:
+ * gifenc is chosen because:
  * - Works entirely in the browser (no server needed)
- * - Uses web workers for performance
- * - Good quality output
- * - Active maintenance and community support
+ * - No web worker dependencies (bundle-friendly)
+ * - Works reliably in Figma's sandboxed environment
+ * - Modern ESM-compatible codebase
+ * - Good quality output with efficient encoding
  */
 
-import GIF from 'gif.js';
+import { GIFEncoder, quantize, applyPalette } from 'gifenc';
 import { FrameData, GifConfig } from '../../plugin/types';
 
 export interface GenerateGifOptions {
@@ -26,8 +27,12 @@ export interface GenerateGifOptions {
 export async function generateGif(options: GenerateGifOptions): Promise<Blob> {
   const { frames, config, onProgress } = options;
 
+  console.log('[GIF] Starting generation with', frames.length, 'frames');
+
   // Filter out disabled frames
   const enabledFrames = frames.filter(f => f.enabled);
+
+  console.log('[GIF] Enabled frames:', enabledFrames.length);
 
   if (enabledFrames.length === 0) {
     throw new Error('No frames enabled for GIF generation');
@@ -38,60 +43,78 @@ export async function generateGif(options: GenerateGifOptions): Promise<Blob> {
   const width = Math.round(firstFrame.width * config.scale);
   const height = Math.round(firstFrame.height * config.scale);
 
+  console.log('[GIF] Output dimensions:', width, 'x', height);
+
   // Initialize GIF encoder
-  // Note: Workers are disabled (workers: 0) because in Figma's sandboxed plugin
-  // environment, we cannot load external worker files. This makes GIF generation
-  // run in the main thread, which is fine for typical use cases (5-20 frames).
-  const gif = new GIF({
-    workers: 0, // Disable workers to avoid "gif.worker.js not found" error in Figma
-    quality: 11 - config.quality, // gif.js uses 1-10 where 1 is best, we invert for intuitive UX
-    width,
-    height,
-    repeat: config.loop ? 0 : -1, // 0 = loop forever, -1 = no loop
-    transparent: null,
-  });
+  console.log('[GIF] Initializing GIF encoder...');
+  const gif = GIFEncoder();
 
-  // Track progress
-  gif.on('progress', (p: number) => {
-    if (onProgress) {
-      onProgress(p);
+  console.log('[GIF] Encoder initialized successfully');
+
+  // Process each frame
+  console.log('[GIF] Processing frames...');
+  for (let i = 0; i < enabledFrames.length; i++) {
+    const frame = enabledFrames[i];
+    console.log(`[GIF] Processing frame ${i + 1}/${enabledFrames.length}`);
+
+    try {
+      // Load and scale the image
+      const imageData = await getImageData(frame.imageData, width, height);
+
+      // Quantize the colors to create a palette
+      // Higher quality = more colors in palette (up to 256)
+      const maxColors = Math.min(256, Math.max(16, config.quality * 25));
+      const palette = quantize(imageData.data, maxColors);
+
+      // Apply the palette to get indexed pixels
+      const index = applyPalette(imageData.data, palette);
+
+      // Write frame to GIF
+      gif.writeFrame(index, width, height, {
+        palette,
+        delay: frame.delay,
+        // Disposal method 2 = restore to background (prevents frame artifacts)
+        dispose: 2,
+      });
+
+      console.log(`[GIF] Frame ${i + 1} added successfully`);
+
+      // Update progress
+      if (onProgress) {
+        onProgress((i + 1) / enabledFrames.length);
+      }
+    } catch (error) {
+      console.error(`[GIF] Failed to process frame ${i + 1}:`, error);
+      throw error;
     }
-  });
-
-  // Add each frame to the GIF
-  for (const frame of enabledFrames) {
-    const image = await loadImageFromUint8Array(frame.imageData, width, height);
-    gif.addFrame(image, {
-      delay: frame.delay,
-    });
   }
 
-  // Render the GIF
-  return new Promise((resolve, reject) => {
-    gif.on('finished', (blob: Blob) => {
-      resolve(blob);
-    });
+  console.log('[GIF] All frames processed, finalizing GIF...');
 
-    gif.on('error', (error: Error) => {
-      reject(error);
-    });
+  // Finalize the GIF
+  gif.finish();
 
-    gif.render();
-  });
+  // Convert to Blob
+  const buffer = gif.bytes();
+  const blob = new Blob([buffer], { type: 'image/gif' });
+
+  console.log('[GIF] GIF created successfully! Size:', blob.size, 'bytes');
+
+  return blob;
 }
 
 /**
- * Loads an image from Uint8Array data and draws it to a canvas
+ * Gets ImageData from a Uint8Array PNG
  * @param imageData - PNG image data as Uint8Array
  * @param targetWidth - Target width for scaling
  * @param targetHeight - Target height for scaling
- * @returns Canvas element with the image drawn at target size
+ * @returns ImageData with RGBA pixel data
  */
-async function loadImageFromUint8Array(
+async function getImageData(
   imageData: Uint8Array,
   targetWidth: number,
   targetHeight: number
-): Promise<HTMLCanvasElement> {
+): Promise<ImageData> {
   // Convert Uint8Array to Blob
   const blob = new Blob([imageData], { type: 'image/png' });
   const url = URL.createObjectURL(blob);
@@ -112,7 +135,8 @@ async function loadImageFromUint8Array(
 
     ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
 
-    return canvas;
+    // Get ImageData
+    return ctx.getImageData(0, 0, targetWidth, targetHeight);
   } finally {
     URL.revokeObjectURL(url);
   }
